@@ -1,9 +1,52 @@
-#include "RingBuffer.h" // for RingBuffer class
+#ifndef RINGBUFFER_MIN
+    #define RINGBUFFER_MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifndef RINGBUFFER_H
+#define RINGBUFFER_H
+
+#include <Arduino.h>    // or <cstddef>, <cstring> if not using Arduino
 #include <string.h>     // for memcpy
 
-// Constructor: Initialize buffer
 template <typename T, size_t N>
-RingBuffer<T, N>::RingBuffer() : head(0), tail(0), count(0) {}
+class RingBuffer {
+public:
+    RingBuffer() : head(0), tail(0), count(0) {}
+    // Push data into the ring buffer
+    // data: pointer to raw bytes
+    // data_len: length of the data in bytes
+    // overwrite: if true, older data is overwritten when buffer is full
+    size_t push(const T& data, bool overwrite = false);
+    size_t push(const T* data, size_t data_len, bool overwrite = false);
+
+    // Pop a specified number of characters from the ring buffer
+    size_t pop(T& output);
+    size_t pop(T* output, size_t len);
+    
+    size_t peek(T& output) const;
+    size_t peek(T* output, size_t len) const;
+
+    size_t available() const { return count; }
+    size_t capacity() const { return N; }
+    void clear();
+
+private:
+    T buffer[N]; // fixed size buffer
+
+    // Select optimal index type based on buffer size
+    using IndexType = typename std::conditional<
+        (N <= 256), uint8_t,
+        typename std::conditional<(N <= 65536), uint16_t, size_t>::type
+    >::type;
+
+    IndexType head;
+    IndexType tail;
+    IndexType count;
+
+    static constexpr bool isPowerOfTwo(size_t n) { return (n & (n - 1)) == 0; }
+    static_assert(isPowerOfTwo(N), "RingBuffer capacity must be a power of 2 for efficiency");
+
+};
 
 // Push a single element
 template <typename T, size_t N>
@@ -35,7 +78,7 @@ size_t RingBuffer<T, N>::push(const T* data, size_t data_len, bool overwrite) {
         buffer[head] = *data;
     } else {
         // Multi-character push
-        size_t firstPart = min(data_len, N - head);
+        size_t firstPart = RINGBUFFER_MIN(data_len, N - head);
         memcpy(&buffer[head], data, firstPart * sizeof(T));
 
         size_t secondPart = data_len - firstPart;
@@ -47,7 +90,7 @@ size_t RingBuffer<T, N>::push(const T* data, size_t data_len, bool overwrite) {
 
     // Update head and count
     head = (head + data_len) & (N - 1);
-    count = min(N, count + data_len); 
+    count = RINGBUFFER_MIN(static_cast<size_t>(N), static_cast<size_t>(count + data_len));
 
     return data_len;
 }
@@ -63,8 +106,8 @@ template <typename T, size_t N>
 size_t RingBuffer<T, N>::pop(T* output, size_t len) {
     if (count == 0) return 0; // Buffer empty
 
-    size_t charsToRead = min(len, count);
-    size_t firstPart = min(charsToRead, N - tail);
+    size_t charsToRead = RINGBUFFER_MIN(len, static_cast<size_t>(count));
+    size_t firstPart = RINGBUFFER_MIN(charsToRead, N - tail);
 
     if (charsToRead == 1) {
         *output = buffer[tail];
@@ -102,8 +145,8 @@ template <typename T, size_t N>
 size_t RingBuffer<T, N>::peek(T* output, size_t len) const {
     if (count == 0 || len == 0) return 0; // Nothing to peek
 
-    size_t peekLen = (len > count) ? count : len; // Limit peek length to available elements
-    size_t firstPart = min(peekLen, N - tail);
+    size_t peekLen = RINGBUFFER_MIN(len, static_cast<size_t>(count));
+    size_t firstPart = RINGBUFFER_MIN(peekLen, N - tail);
 
     // Copy first segment
     memcpy(output, &buffer[tail], firstPart * sizeof(T));
@@ -124,3 +167,5 @@ void RingBuffer<T, N>::clear() {
     tail = 0;
     count = 0;
 }
+
+#endif // RINGBUFFER_H
